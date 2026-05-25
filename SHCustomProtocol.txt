@@ -29,9 +29,9 @@ format([Throttle], '0') + ';' +
 format([Brake], '0') + ';' +
 isnull([GameRawData.CarSetupPacket.m_diffOnThrottle],  '50') + ';' +
 isnull([GameRawData.CarSetupPacket.m_diffOffThrottle], '50') + ';' +
-format(isnull([LastSector1Time],0),'0.000') + ';' +
-format(isnull([LastSector2Time],0),'0.000') + ';' +
-format(isnull([LastSector3Time],0),'0.000') + ';' +
+format(isnull([LastSector1Time],0),'0.0') + ';' +
+format(isnull([LastSector2Time],0),'0.0') + ';' +
+format(isnull([LastSector3Time],0),'0.0') + ';' +
 if(isnull([LastSector1Time]),'0',if([LastSector1Time]<=[PersistantTrackerPlugin.Session_Best_Sector1],'3',if([LastSector1Time]<=[BestSector1Time],'2','1'))) + ';' +
 if(isnull([LastSector2Time]),'0',if([LastSector2Time]<=[PersistantTrackerPlugin.Session_Best_Sector2],'3',if([LastSector2Time]<=[BestSector2Time],'2','1'))) + ';' +
 if(isnull([LastSector3Time]),'0',if([LastSector3Time]<=[PersistantTrackerPlugin.Session_Best_Sector3],'3',if([LastSector3Time]<=[BestSector3Time],'2','1'))) + ';' +
