@@ -2,7 +2,6 @@
 #include <TFT_eSPI.h>
 #include "dashboard.h"
 #include "simhub_protocol.h"
-
 // ============================================================
 //  DashRenderer — draws the Lovely-style dashboard on ILI9488
 //  Principle: only redraw regions that have changed.
@@ -16,6 +15,12 @@ public:
         _tft.begin();
         _tft.setRotation(1);           // Landscape, USB connector on left
         _tft.fillScreen(C_BG);
+
+        // Allocate the scrolling graph sprite (rendered in RAM, pushed as one SPI burst)
+        _graphSprite = new TFT_eSprite(&_tft);
+        _graphSprite->setColorDepth(16);
+        _graphSprite->createSprite(GRAPH_W, GRAPH_H);
+        _graphSprite->fillSprite(C_BG);
         _drawStaticChrome();           // Labels, dividers, boxes that never change
         _drawIdleScreen();             // Show "Waiting for SimHub..." until data arrives
     }
@@ -29,12 +34,14 @@ public:
         _updateGear(d.gear);
         _updateSpeed(d.speed);
         _updateLapTimes(d.curLap, d.lastLap, d.bestLap, d.lapInvalid);
+        _updateSectors(d.s1Time, d.s2Time, d.s3Time, d.s1Flag, d.s2Flag, d.s3Flag);
         _updateDelta(d.delta);
         _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel);
-        _updateAids(d.tcLevel, d.tcActive, d.absLevel, d.absActive, d.brakeBias);
+        _updateAids(d.tcLevel, d.tcActive, d.absLevel, d.absActive, d.brakeBias,
+                    d.diffOnThrottle, d.diffOffThrottle);
         _updateTyres(d.tyrePFL, d.tyrePFR, d.tyrePRL, d.tyrePRR,
                      d.tyreTFL, d.tyreTFR, d.tyreTRL, d.tyreTRR);
-        _updateInputBars(d.throttle, d.brake);
+        _updateGraph(d.throttle, d.brake);
     }
 
 private:
@@ -49,6 +56,8 @@ private:
     String _prevLastLap;
     String _prevBestLap;
     bool   _prevLapInv    = false;
+    String _prevS1Time, _prevS2Time, _prevS3Time;
+    int    _prevS1Flag = -1, _prevS2Flag = -1, _prevS3Flag = -1;
     String _prevDelta;
     int    _prevLap       = -1;
     int    _prevPos       = -1;
@@ -59,11 +68,17 @@ private:
     int    _prevABS       = -1;
     bool   _prevABSA      = false;
     float  _prevBB        = -1;
+    int    _prevDiffOn    = -1;
+    int    _prevDiffOff   = -1;
     float  _prevTyreP[4]  = {-1,-1,-1,-1};
     float  _prevTyreT[4]  = {-1,-1,-1,-1};
-    int    _prevThr       = -1;
-    int    _prevBrk       = -1;
     bool   _idleCleared   = false;
+
+    // ---- Scrolling trace graph ----
+    TFT_eSprite* _graphSprite = nullptr;
+    uint8_t _gthr[GRAPH_W]   = {};   // ring buffer — throttle 0-100
+    uint8_t _gbrk[GRAPH_W]   = {};   // ring buffer — brake    0-100
+    int     _ghead            = 0;   // next write position
 
     // ============================================================
     //  Static chrome — drawn once
@@ -95,9 +110,19 @@ private:
         _tft.setFreeFont(nullptr);  // default GLCD font
 
         _tft.setTextSize(1);
-        _labelText("BEST",    LP_X + 4,  MAIN_Y + 6,       C_CYAN);
-        _labelText("LAST",    LP_X + 4,  MAIN_Y + 72,      C_DIM_WHITE);
-        _labelText("CURRENT", LP_X + 4,  MAIN_Y + 138,     C_WHITE);
+        // Lap times — tighter spacing to leave room for sector strip at bottom
+        _labelText("BEST",    LP_X + 4,  MAIN_Y + 4,   C_CYAN);
+        _labelText("LAST",    LP_X + 4,  MAIN_Y + 44,  C_DIM_WHITE);
+        _labelText("CURRENT", LP_X + 4,  MAIN_Y + 84,  C_WHITE);
+
+        // Sector strip separator and labels (static S1/S2/S3 headers)
+        // Sector area: MAIN_Y+124 → MAIN_Y+200
+        _tft.drawFastHLine(LP_X, MAIN_Y + 122, LP_W, C_DARK_GREY);
+        _labelText("SECTORS", LP_X + 4,  MAIN_Y + 126, C_LIGHT_GREY);
+        // Each box is 50px wide with 2px gap; label centered in box
+        _labelText("S1",      LP_X + 19, MAIN_Y + 140, C_LIGHT_GREY);
+        _labelText("S2",      LP_X + 71, MAIN_Y + 140, C_LIGHT_GREY);
+        _labelText("S3",      LP_X + 119,MAIN_Y + 140, C_LIGHT_GREY);
 
         // ---- Right panel labels ----
         _labelText("DELTA",   RP_X + 4,  MAIN_Y + 6,       C_LIGHT_GREY);
@@ -112,14 +137,17 @@ private:
         _labelText("RL",      BT_TYRE_X + 4,  BOT_Y + 46, C_CYAN);
         _labelText("RR",      BT_TYRE_X + 102,BOT_Y + 46, C_CYAN);
 
-        // ---- Bottom aids labels ----
-        _labelText("TC",      BT_AID_X + 4,   BOT_Y + 16, C_YELLOW);
-        _labelText("ABS",     BT_AID_X + 46,  BOT_Y + 16, C_BLUE);
-        _labelText("BB",      BT_AID_X + 94,  BOT_Y + 16, C_MAGENTA);
+        // ---- Bottom aids labels — row 1: TC / ABS / BB ----
+        _labelText("TC",      BT_AID_X + 4,   BOT_Y + 4,  C_YELLOW);
+        _labelText("ABS",     BT_AID_X + 46,  BOT_Y + 4,  C_BLUE);
+        _labelText("BB",      BT_AID_X + 94,  BOT_Y + 4,  C_MAGENTA);
+        // ---- Bottom aids labels — row 2: DIFF ON / DIFF OFF ----
+        _labelText("D-ON",    BT_AID_X + 4,   BOT_Y + 42, C_TEAL);
+        _labelText("D-OFF",   BT_AID_X + 68,  BOT_Y + 42, C_TEAL);
 
-        // ---- Input bar labels ----
-        _labelText("THR",     BT_INP_X + 4,   BOT_Y + 2,  C_GREEN);
-        _labelText("BRK",     BT_INP_X + 4,   BOT_Y + 38, C_RED);
+        // ---- Trace graph border and label ----
+        _tft.drawRect(GRAPH_X - 1, GRAPH_Y - 1, GRAPH_W + 2, GRAPH_H + 2, C_DARK_GREY);
+        _labelText("TRACE", GRAPH_X, BOT_Y - 2 + BOT_H - 6, C_MID_GREY);  // tiny label below border
 
         // ---- Center panel "GEAR" and "KM/H" sublabels ----
         _labelText("GEAR",    CP_X + (CP_W/2) - 16, MAIN_Y + 4, C_DARK_GREY);
@@ -250,19 +278,19 @@ private:
         int baseY = MAIN_Y;
 
         if (best != _prevBestLap) {
-            _tft.fillRect(LP_X + 2, baseY + 20, LP_W - 4, 46, C_BG);
-            _lapTimeText(best,  LP_X + 6, baseY + 22, C_CYAN, false);
+            _tft.fillRect(LP_X + 2, baseY + 14, LP_W - 4, 26, C_BG);
+            _lapTimeText(best,  LP_X + 4, baseY + 15, C_CYAN, false);
             _prevBestLap = best;
         }
         if (last != _prevLastLap) {
-            _tft.fillRect(LP_X + 2, baseY + 86, LP_W - 4, 46, C_BG);
-            _lapTimeText(last,  LP_X + 6, baseY + 88, C_DIM_WHITE, false);
+            _tft.fillRect(LP_X + 2, baseY + 54, LP_W - 4, 26, C_BG);
+            _lapTimeText(last,  LP_X + 4, baseY + 55, C_DIM_WHITE, false);
             _prevLastLap = last;
         }
         if (cur != _prevCurLap || lapInv != _prevLapInv) {
-            _tft.fillRect(LP_X + 2, baseY + 152, LP_W - 4, 46, C_BG);
+            _tft.fillRect(LP_X + 2, baseY + 94, LP_W - 4, 26, C_BG);
             uint16_t col = lapInv ? C_RED : C_WHITE;
-            _lapTimeText(cur, LP_X + 6, baseY + 154, col, lapInv);
+            _lapTimeText(cur, LP_X + 4, baseY + 95, col, lapInv);
             _prevCurLap  = cur;
             _prevLapInv  = lapInv;
         }
@@ -271,9 +299,65 @@ private:
     void _lapTimeText(const String& t, int x, int y, uint16_t col, bool flash) {
         _tft.setTextColor(col, C_BG);
         _tft.setTextDatum(TL_DATUM);
-        _tft.setTextSize(3);
+        _tft.setTextSize(2);
         _tft.drawString(t, x, y);
         _tft.setTextSize(1);
+    }
+
+    // ============================================================
+    //  Sector Times — 3 boxes in the bottom of the left panel
+    //  MAIN_Y+152 to MAIN_Y+200
+    //  Each box 48px wide, 44px tall; boxes at x=2, 52, 102
+    //  Purple fill for session best; colored text otherwise.
+    // ============================================================
+    void _updateSectors(const String& s1, const String& s2, const String& s3,
+                        int f1, int f2, int f3) {
+        bool changed = (s1 != _prevS1Time || f1 != _prevS1Flag ||
+                        s2 != _prevS2Time || f2 != _prevS2Flag ||
+                        s3 != _prevS3Time || f3 != _prevS3Flag);
+        if (!changed) return;
+
+        static constexpr int BOX_X[3] = {LP_X + 2,  LP_X + 52, LP_X + 104};
+        static constexpr int BOX_W    = 48;
+        static constexpr int BOX_Y    = MAIN_Y + 152;
+        static constexpr int BOX_H    = 46;
+
+        const String* times[3] = {&s1, &s2, &s3};
+        int           flags[3] = {f1, f2, f3};
+        bool          prevChanged[3] = {
+            s1 != _prevS1Time || f1 != _prevS1Flag,
+            s2 != _prevS2Time || f2 != _prevS2Flag,
+            s3 != _prevS3Time || f3 != _prevS3Flag
+        };
+
+        for (int i = 0; i < 3; i++) {
+            if (!prevChanged[i]) continue;
+
+            int   bx   = BOX_X[i];
+            int   flag = flags[i];
+            uint16_t col = sectorColor(flag);
+
+            // Background: purple fill for session best, dark for others
+            if (flag == 3) {
+                _tft.fillRect(bx, BOX_Y, BOX_W, BOX_H, C_PURPLE);
+                _tft.drawRect(bx, BOX_Y, BOX_W, BOX_H, C_PURPLE);
+            } else {
+                _tft.fillRect(bx, BOX_Y, BOX_W, BOX_H, C_BG);
+                _tft.drawRect(bx, BOX_Y, BOX_W, BOX_H, C_DARK_GREY);
+            }
+
+            // Time value — centered in box
+            uint16_t textCol = (flag == 3) ? C_WHITE : col;
+            _tft.setTextColor(textCol, (flag == 3) ? C_PURPLE : C_BG);
+            _tft.setTextDatum(MC_DATUM);
+            _tft.setTextSize(1);
+            _tft.drawString(*times[i], bx + BOX_W / 2, BOX_Y + BOX_H / 2);
+        }
+
+        _tft.setTextDatum(TL_DATUM);
+        _prevS1Time = s1;  _prevS1Flag = f1;
+        _prevS2Time = s2;  _prevS2Flag = f2;
+        _prevS3Time = s3;  _prevS3Flag = f3;
     }
 
     // ============================================================
@@ -346,42 +430,60 @@ private:
     }
 
     // ============================================================
-    //  Driver Aids — bottom center
+    //  Driver Aids — bottom center, two rows:
+    //  Row 1 (y≈18): TC  ABS  BB
+    //  Row 2 (y≈56): DIFF-ON  DIFF-OFF
     // ============================================================
-    void _updateAids(int tc, bool tcA, int abs_, bool absA, float bb) {
-        bool changed = (tc != _prevTC || tcA != _prevTCA ||
-                        abs_ != _prevABS || absA != _prevABSA ||
-                        bb != _prevBB);
+    void _updateAids(int tc, bool tcA, int abs_, bool absA, float bb,
+                     int diffOn, int diffOff) {
+        bool changed = (tc      != _prevTC    || tcA   != _prevTCA  ||
+                        abs_    != _prevABS   || absA  != _prevABSA ||
+                        bb      != _prevBB    ||
+                        diffOn  != _prevDiffOn || diffOff != _prevDiffOff);
         if (!changed) return;
 
-        int x = BT_AID_X;
-        int y = BOT_Y + 30;
+        int x  = BT_AID_X;
+        int y1 = BOT_Y + 18;   // row 1 values
+        int y2 = BOT_Y + 56;   // row 2 values
 
-        // TC
-        _tft.fillRect(x + 2,   y - 2,  40, 30, C_BG);
-        uint16_t tcCol = tcA ? C_YELLOW : C_MID_GREY;
-        _tft.setTextColor(tcCol, C_BG);
+        // ── Row 1: TC ──
+        _tft.fillRect(x + 2,  y1 - 2, 38, 26, C_BG);
+        _tft.setTextColor(tcA ? C_YELLOW : C_MID_GREY, C_BG);
         _tft.setTextDatum(TL_DATUM);
         _tft.setTextSize(3);
-        _tft.drawString(String(tc), x + 4, y);
+        _tft.drawString(String(tc), x + 4, y1);
 
-        // ABS
-        _tft.fillRect(x + 44,  y - 2, 42, 30, C_BG);
-        uint16_t absCol = absA ? TFT_CYAN : C_MID_GREY;
-        _tft.setTextColor(absCol, C_BG);
-        _tft.drawString(String(abs_), x + 46, y);
+        // ── Row 1: ABS ──
+        _tft.fillRect(x + 42, y1 - 2, 42, 26, C_BG);
+        _tft.setTextColor(absA ? TFT_CYAN : C_MID_GREY, C_BG);
+        _tft.drawString(String(abs_), x + 44, y1);
 
-        // BB
-        _tft.fillRect(x + 90,  y - 2, 38, 30, C_BG);
+        // ── Row 1: BB ──
+        _tft.fillRect(x + 86, y1 - 2, 42, 26, C_BG);
         _tft.setTextColor(C_MAGENTA, C_BG);
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%.0f", bb);
-        _tft.drawString(String(buf), x + 92, y);
+        char bbBuf[8];
+        snprintf(bbBuf, sizeof(bbBuf), "%.0f", bb);
+        _tft.drawString(bbBuf, x + 88, y1);
+
+        // ── Row 2: Diff on throttle ──
+        _tft.fillRect(x + 2,  y2 - 2, 58, 26, C_BG);
+        _tft.setTextColor(C_TEAL, C_BG);
+        _tft.setTextSize(3);
+        char dBuf[8];
+        snprintf(dBuf, sizeof(dBuf), "%d%%", diffOn);
+        _tft.drawString(dBuf, x + 4, y2);
+
+        // ── Row 2: Diff off throttle ──
+        _tft.fillRect(x + 66, y2 - 2, 62, 26, C_BG);
+        _tft.setTextColor(C_TEAL, C_BG);
+        snprintf(dBuf, sizeof(dBuf), "%d%%", diffOff);
+        _tft.drawString(dBuf, x + 68, y2);
 
         _tft.setTextSize(1);
-        _prevTC   = tc;  _prevTCA  = tcA;
-        _prevABS  = abs_; _prevABSA = absA;
-        _prevBB   = bb;
+        _prevTC      = tc;    _prevTCA     = tcA;
+        _prevABS     = abs_;  _prevABSA    = absA;
+        _prevBB      = bb;
+        _prevDiffOn  = diffOn; _prevDiffOff = diffOff;
     }
 
     // ============================================================
@@ -442,30 +544,58 @@ private:
     }
 
     // ============================================================
-    //  Throttle / Brake input bars — bottom right
+    //  Scrolling throttle / brake trace — bottom right
+    //
+    //  Strategy: ring buffer (140 uint8 values each) rendered into
+    //  a TFT_eSprite in RAM, then pushed as a single SPI burst.
+    //  This scrolls smoothly at SimHub's update rate (~20-30 Hz)
+    //  without reading pixels back from the slow SPI bus.
+    //
+    //  Layout (from bottom = 0%):
+    //    Green columns = throttle  (fills upward)
+    //    Red   columns = brake     (fills upward, drawn on top)
+    //  A light 25% / 50% / 75% grid gives depth.
     // ============================================================
-    void _updateInputBars(int thr, int brk) {
-        if (thr == _prevThr && brk == _prevBrk) return;
+    void _updateGraph(int thr, int brk) {
+        thr = constrain(thr, 0, 100);
+        brk = constrain(brk, 0, 100);
 
-        int x = BT_INP_X + 4;
-        int maxW = BT_INP_W - 10;
-        int barH = 22;
+        // Push new sample into ring buffer
+        _gthr[_ghead] = (uint8_t)thr;
+        _gbrk[_ghead] = (uint8_t)brk;
+        _ghead = (_ghead + 1) % GRAPH_W;
 
-        // Throttle bar
-        if (thr != _prevThr) {
-            _tft.fillRect(x, BOT_Y + 15, maxW, barH, C_DARK_GREY);
-            int w = (maxW * constrain(thr, 0, 100)) / 100;
-            if (w > 0) _tft.fillRect(x, BOT_Y + 15, w, barH, C_GREEN);
-            _prevThr = thr;
+        // ── Render sprite ──
+        _graphSprite->fillSprite(C_BG);
+
+        // Subtle horizontal grid lines at 25 / 50 / 75 %
+        static constexpr uint16_t GRID = 0x1082;   // very dark grey
+        static const int gridPct[3] = {25, 50, 75};
+        for (int gi = 0; gi < 3; gi++) {
+            int gy = GRAPH_H - (gridPct[gi] * GRAPH_H) / 100;
+            _graphSprite->drawFastHLine(0, gy, GRAPH_W, GRID);
         }
 
-        // Brake bar
-        if (brk != _prevBrk) {
-            _tft.fillRect(x, BOT_Y + 50, maxW, barH, C_DARK_GREY);
-            int w = (maxW * constrain(brk, 0, 100)) / 100;
-            if (w > 0) _tft.fillRect(x, BOT_Y + 50, w, barH, C_RED);
-            _prevBrk = brk;
+        // Draw each column oldest-to-newest (left-to-right = past-to-present)
+        for (int col = 0; col < GRAPH_W; col++) {
+            int i = (_ghead + col) % GRAPH_W;
+            int tv = _gthr[i];
+            int bv = _gbrk[i];
+
+            int thrH = (tv * GRAPH_H) / 100;
+            int brkH = (bv * GRAPH_H) / 100;
+
+            // Throttle — green, rising from bottom
+            if (thrH > 0)
+                _graphSprite->drawFastVLine(col, GRAPH_H - thrH, thrH, C_GREEN);
+
+            // Brake — red, rising from bottom, drawn on top of throttle
+            if (brkH > 0)
+                _graphSprite->drawFastVLine(col, GRAPH_H - brkH, brkH, C_RED);
         }
+
+        // Push sprite to screen as one SPI burst
+        _graphSprite->pushSprite(GRAPH_X, GRAPH_Y);
     }
 
     // ============================================================

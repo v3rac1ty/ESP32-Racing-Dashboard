@@ -44,9 +44,20 @@ struct SimHubData {
     float  tyreTRL     = 0.0f;
     float  tyreTRR     = 0.0f;
 
-    // Inputs (0-100)
+    // Sector times (last completed lap) + color flags
+    // Flag: 3=purple/session-best  2=green/PB  1=yellow/slower  0=no data
+    String s1Time  = "-.---";
+    String s2Time  = "-.---";
+    String s3Time  = "-.---";
+    int    s1Flag  = 0;
+    int    s2Flag  = 0;
+    int    s3Flag  = 0;
     int    throttle    = 0;
     int    brake       = 0;
+
+    // F1 car setup — differential (0–100 %)
+    int    diffOnThrottle  = 50;
+    int    diffOffThrottle = 50;
 
     bool valid = false;   // true once at least one packet received
 };
@@ -149,6 +160,15 @@ private:
         data.tyreTRR    = field(line, i++).toFloat();
         data.throttle   = field(line, i++).toInt();
         data.brake      = field(line, i++).toInt();
+        data.diffOnThrottle  = field(line, i++).toInt();
+        data.diffOffThrottle = field(line, i++).toInt();
+        // Sector times + color flags
+        data.s1Time = field(line, i++);  if (data.s1Time.isEmpty()) data.s1Time = "-.---";
+        data.s2Time = field(line, i++);  if (data.s2Time.isEmpty()) data.s2Time = "-.---";
+        data.s3Time = field(line, i++);  if (data.s3Time.isEmpty()) data.s3Time = "-.---";
+        data.s1Flag = field(line, i++).toInt();
+        data.s2Flag = field(line, i++).toInt();
+        data.s3Flag = field(line, i++).toInt();
 
         data.valid = true;
         return true;

@@ -24,6 +24,7 @@ static constexpr uint32_t C_LIGHT_GREY = 0x8410;
 static constexpr uint32_t C_BLUE       = 0x001F;
 static constexpr uint32_t C_TEAL       = 0x0410;
 static constexpr uint32_t C_DIM_WHITE  = 0xC618;
+static constexpr uint32_t C_PURPLE     = 0xA019;   // ~#A000C8 — F1 session-best purple
 
 // ============================================================
 //  Layout regions (all pixel-exact for 480×320)
@@ -83,9 +84,26 @@ static constexpr int BT_AID_W  = 130;
 static constexpr int BT_INP_X  = BT_AID_X + BT_AID_W + 2;
 static constexpr int BT_INP_W  = SCR_W - BT_INP_X;
 
+// --- Scrolling trace graph (inside BT_INP section) ---
+// Sprite size: GRAPH_W × GRAPH_H × 2 bytes ≈ 19 KB heap
+static constexpr int GRAPH_X  = BT_INP_X + 3;
+static constexpr int GRAPH_Y  = BOT_Y + 4;
+static constexpr int GRAPH_W  = BT_INP_W - 6;   // 140 px — one column per data point
+static constexpr int GRAPH_H  = BOT_H - 8;       // 66 px
+
 // ============================================================
-//  Dot colour by index — mirrors a real shift-light strip
+//  Sector flag → display color
+//  3 = session best (purple)   2 = personal best (green)
+//  1 = slower than PB (yellow) 0 = no data (dim)
 // ============================================================
+inline uint16_t sectorColor(int flag) {
+    switch (flag) {
+        case 3:  return C_PURPLE;
+        case 2:  return C_GREEN;
+        case 1:  return C_YELLOW;
+        default: return C_MID_GREY;
+    }
+}
 inline uint16_t rpmDotColor(int dotIdx) {
     if (dotIdx >= 19) return C_RED;
     if (dotIdx >= 15) return C_ORANGE;
