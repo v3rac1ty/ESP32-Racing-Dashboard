@@ -44,6 +44,19 @@ struct SimHubData {
     float  tyreTRL     = 0.0f;
     float  tyreTRR     = 0.0f;
 
+    // DRS: 0=unavailable  1=available (open zone)  2=active
+    int    drsStatus   = 0;
+
+    // Time gaps to adjacent cars (seconds; 0 = no car / lapped)
+    float  gapFront    = 0.0f;
+    float  gapBehind   = 0.0f;
+
+    // ERS
+    int    ersPct      = 0;    // 0-100 %
+    int    ersMode     = 0;    // 0=none  1=medium  2=overtake  3=hotlap
+    String lastLapDelta = "---"; // delta of last lap vs best (+S.SSS / -S.SSS)
+    int    waterTemp    = 0;    // °C
+
     // Sector times (last completed lap) + color flags
     // Flag: 3=purple/session-best  2=green/PB  1=yellow/slower  0=no data
     String s1Time  = "-.---";
@@ -169,6 +182,15 @@ private:
         data.s1Flag = field(line, i++).toInt();
         data.s2Flag = field(line, i++).toInt();
         data.s3Flag = field(line, i++).toInt();
+        // DRS / gaps / ERS
+        data.drsStatus  = field(line, i++).toInt();
+        data.gapFront   = field(line, i++).toFloat();
+        data.gapBehind  = field(line, i++).toFloat();
+        data.ersPct     = field(line, i++).toInt();
+        data.ersMode    = field(line, i++).toInt();
+        data.lastLapDelta = field(line, i++);
+        if (data.lastLapDelta.isEmpty()) data.lastLapDelta = "---";
+        data.waterTemp  = field(line, i++).toInt();
 
         data.valid = true;
         return true;

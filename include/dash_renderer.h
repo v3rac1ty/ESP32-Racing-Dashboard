@@ -33,10 +33,14 @@ public:
         _updateRpmDots(d.rpmPct, d.rpmRedline);
         _updateGear(d.gear);
         _updateSpeed(d.speed);
-        _updateLapTimes(d.curLap, d.lastLap, d.bestLap, d.lapInvalid);
+        _updateLapTimes(d.curLap, d.lastLap, d.bestLap, d.lapInvalid,
+                        d.lastLapDelta, d.delta);
         _updateSectors(d.s1Time, d.s2Time, d.s3Time, d.s1Flag, d.s2Flag, d.s3Flag);
+        _updateDRS(d.drsStatus);
         _updateDelta(d.delta);
-        _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel);
+        _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel, d.waterTemp);
+        _updateGaps(d.gapFront, d.gapBehind);
+        _updateERS(d.ersPct, d.ersMode);
         _updateAids(d.tcLevel, d.tcActive, d.absLevel, d.absActive, d.brakeBias,
                     d.diffOnThrottle);
         _updateTyres(d.tyrePFL, d.tyrePFR, d.tyrePRL, d.tyrePRR,
@@ -63,6 +67,14 @@ private:
     int    _prevPos       = -1;
     int    _prevCars      = -1;
     float  _prevFuel      = -1;
+    int    _prevDRS       = -1;
+    float  _prevGapF      = -99;
+    float  _prevGapB      = -99;
+    int    _prevErsPct    = -1;
+    int    _prevErsMode   = -1;
+    String _prevLastDelta;
+    String _prevCurDelta;
+    int    _prevWaterTemp = -1;
     int    _prevTC        = -1;
     bool   _prevTCA       = false;
     int    _prevABS       = -1;
@@ -110,25 +122,28 @@ private:
         _tft.setFreeFont(nullptr);  // default GLCD font
 
         _tft.setTextSize(1);
-        // Lap times — tighter spacing to leave room for sector strip at bottom
+        // Lap times — tighter spacing, delta tags on right
         _labelText("BEST",    LP_X + 4,  MAIN_Y + 4,   C_CYAN);
-        _labelText("LAST",    LP_X + 4,  MAIN_Y + 44,  C_DIM_WHITE);
-        _labelText("CURRENT", LP_X + 4,  MAIN_Y + 84,  C_WHITE);
+        _labelText("LAST",    LP_X + 4,  MAIN_Y + 33,  C_DIM_WHITE);
+        _labelText("CURRENT", LP_X + 4,  MAIN_Y + 62,  C_WHITE);
 
-        // Sector strip separator and labels (static S1/S2/S3 headers)
-        // Sector area: MAIN_Y+124 → MAIN_Y+200
-        _tft.drawFastHLine(LP_X, MAIN_Y + 122, LP_W, C_DARK_GREY);
-        _labelText("SECTORS", LP_X + 4,  MAIN_Y + 126, C_LIGHT_GREY);
-        // Each box is 50px wide with 2px gap; label centered in box
-        _labelText("S1",      LP_X + 19, MAIN_Y + 140, C_LIGHT_GREY);
-        _labelText("S2",      LP_X + 71, MAIN_Y + 140, C_LIGHT_GREY);
-        _labelText("S3",      LP_X + 119,MAIN_Y + 140, C_LIGHT_GREY);
+        // Sector strip
+        _tft.drawFastHLine(LP_X, MAIN_Y + 92, LP_W, C_DARK_GREY);
+        _labelText("SECTORS", LP_X + 4,  MAIN_Y + 96,  C_LIGHT_GREY);
+        _labelText("S1",      LP_X + 19, MAIN_Y + 109, C_LIGHT_GREY);
+        _labelText("S2",      LP_X + 71, MAIN_Y + 109, C_LIGHT_GREY);
+        _labelText("S3",      LP_X + 119,MAIN_Y + 109, C_LIGHT_GREY);
 
-        // ---- Right panel labels ----
-        _labelText("DELTA",   RP_X + 4,  MAIN_Y + 6,       C_LIGHT_GREY);
-        _labelText("POS",     RP_X + 4,  MAIN_Y + 110,     C_LIGHT_GREY);
-        _labelText("LAP",     RP_X + 80, MAIN_Y + 110,     C_LIGHT_GREY);
-        _labelText("FUEL",    RP_X + 4,  MAIN_Y + 150,     C_LIGHT_GREY);
+        // ---- Right panel labels (top→bottom: DRS, DELTA, POS/LAP, FUEL/H2O, GAP, ERS) ----
+        _labelText("DRS",    RP_X + 4,  MAIN_Y + 4,   C_LIGHT_GREY);
+        _labelText("DELTA",  RP_X + 4,  MAIN_Y + 36,  C_LIGHT_GREY);
+        _labelText("POS",    RP_X + 4,  MAIN_Y + 69,  C_LIGHT_GREY);
+        _labelText("LAP",    RP_X + 80, MAIN_Y + 69,  C_LIGHT_GREY);
+        _labelText("FUEL",   RP_X + 4,  MAIN_Y + 95,  C_LIGHT_GREY);
+        _labelText("H2O",    RP_X + 80, MAIN_Y + 95,  C_LIGHT_GREY);
+        _labelText("GAP F",  RP_X + 4,  MAIN_Y + 121, C_LIGHT_GREY);
+        _labelText("GAP B",  RP_X + 80, MAIN_Y + 121, C_LIGHT_GREY);
+        _labelText("ERS",    RP_X + 4,  MAIN_Y + 147, C_LIGHT_GREY);
 
         // ---- Bottom tyre labels ----
         _labelText("TYRES",   BT_TYRE_X + 4,  BOT_Y + 2,  C_LIGHT_GREY);
@@ -270,28 +285,66 @@ private:
     }
 
     // ============================================================
-    //  Lap Times — left panel
+    //  Lap Times + inline deltas — left panel
+    //  BEST: time + purple ■ (session-best indicator)
+    //  LAST: time + delta vs best (colored)
+    //  CURRENT: time + live delta from right panel (colored)
     // ============================================================
     void _updateLapTimes(const String& cur, const String& last,
-                         const String& best, bool lapInv) {
+                         const String& best, bool lapInv,
+                         const String& lastDelta, const String& curDelta) {
         int baseY = MAIN_Y;
 
+        // ── BEST ──
         if (best != _prevBestLap) {
-            _tft.fillRect(LP_X + 2, baseY + 14, LP_W - 4, 26, C_BG);
-            _lapTimeText(best,  LP_X + 4, baseY + 15, C_CYAN, false);
+            _tft.fillRect(LP_X + 2, baseY + 13, LP_W - 4, 17, C_BG);
+            _lapTimeText(best, LP_X + 4, baseY + 14, C_CYAN, false);
+            // Purple session-best square at right edge
+            if (best.length() > 4)
+                _tft.fillRect(LP_X + LP_W - 10, baseY + 16, 7, 7, C_PURPLE);
             _prevBestLap = best;
         }
-        if (last != _prevLastLap) {
-            _tft.fillRect(LP_X + 2, baseY + 54, LP_W - 4, 26, C_BG);
-            _lapTimeText(last,  LP_X + 4, baseY + 55, C_DIM_WHITE, false);
-            _prevLastLap = last;
+
+        // ── LAST ──
+        if (last != _prevLastLap || lastDelta != _prevLastDelta) {
+            _tft.fillRect(LP_X + 2, baseY + 42, LP_W - 4, 17, C_BG);
+            _lapTimeText(last, LP_X + 4, baseY + 43, C_DIM_WHITE, false);
+            // Delta tag — green if new best, yellow/red otherwise
+            if (lastDelta != "---") {
+                bool faster = (lastDelta[0] == '-');
+                uint16_t dc = faster ? C_GREEN : C_YELLOW;
+                if (!faster && lastDelta.length() > 2) {
+                    // crude threshold: >+0.5 → red
+                    dc = (lastDelta[1] == '0') ? C_YELLOW : C_RED;
+                }
+                _tft.setTextColor(dc, C_BG);
+                _tft.setTextDatum(TR_DATUM);
+                _tft.setTextSize(1);
+                _tft.drawString(lastDelta, LP_X + LP_W - 2, baseY + 46);
+                _tft.setTextDatum(TL_DATUM);
+            }
+            _prevLastLap   = last;
+            _prevLastDelta = lastDelta;
         }
-        if (cur != _prevCurLap || lapInv != _prevLapInv) {
-            _tft.fillRect(LP_X + 2, baseY + 94, LP_W - 4, 26, C_BG);
+
+        // ── CURRENT ──
+        if (cur != _prevCurLap || lapInv != _prevLapInv || curDelta != _prevCurDelta) {
+            _tft.fillRect(LP_X + 2, baseY + 71, LP_W - 4, 17, C_BG);
             uint16_t col = lapInv ? C_RED : C_WHITE;
-            _lapTimeText(cur, LP_X + 4, baseY + 95, col, lapInv);
-            _prevCurLap  = cur;
-            _prevLapInv  = lapInv;
+            _lapTimeText(cur, LP_X + 4, baseY + 72, col, lapInv);
+            // Live delta
+            if (curDelta != "0" && curDelta != "+0.000" && curDelta != "---") {
+                bool faster = (curDelta[0] == '-');
+                uint16_t dc = faster ? C_GREEN : C_RED;
+                _tft.setTextColor(dc, C_BG);
+                _tft.setTextDatum(TR_DATUM);
+                _tft.setTextSize(1);
+                _tft.drawString(curDelta, LP_X + LP_W - 2, baseY + 75);
+                _tft.setTextDatum(TL_DATUM);
+            }
+            _prevCurLap   = cur;
+            _prevLapInv   = lapInv;
+            _prevCurDelta = curDelta;
         }
     }
 
@@ -318,8 +371,8 @@ private:
 
         static constexpr int BOX_X[3] = {LP_X + 2,  LP_X + 52, LP_X + 104};
         static constexpr int BOX_W    = 48;
-        static constexpr int BOX_Y    = MAIN_Y + 152;
-        static constexpr int BOX_H    = 46;
+        static constexpr int BOX_Y    = MAIN_Y + 118;
+        static constexpr int BOX_H    = 80;
 
         const String* times[3] = {&s1, &s2, &s3};
         int           flags[3] = {f1, f2, f3};
@@ -360,72 +413,166 @@ private:
     }
 
     // ============================================================
-    //  Delta — right panel top
+    //  Delta — below DRS badge
     // ============================================================
     void _updateDelta(const String& delta) {
         if (delta == _prevDelta) return;
-
-        _tft.fillRect(RP_X + 1, MAIN_Y + 20, RP_W - 2, 80, C_BG);
-
+        _tft.fillRect(RP_X + 1, MAIN_Y + 44, RP_W - 2, 22, C_BG);
         bool negative = (delta.indexOf('-') >= 0);
-        uint16_t col  = negative ? C_GREEN : C_RED;  // Negative delta = faster = good
-
-        _tft.setTextColor(col, C_BG);
+        _tft.setTextColor(negative ? C_GREEN : C_RED, C_BG);
         _tft.setTextDatum(MC_DATUM);
-        _tft.setTextSize(4);
-        _tft.drawString(delta, RP_X + RP_W / 2, MAIN_Y + 60);
+        _tft.setTextSize(3);
+        _tft.drawString(delta, RP_X + RP_W / 2, MAIN_Y + 55);
         _tft.setTextSize(1);
         _tft.setTextDatum(TL_DATUM);
         _prevDelta = delta;
     }
 
     // ============================================================
-    //  Session info — position, lap, fuel
+    //  Session info — pos/lap, fuel + water temp
     // ============================================================
-    void _updateSessionInfo(int lap, int pos, int cars, float fuel) {
-        bool changed = (lap   != _prevLap  ||
-                        pos   != _prevPos  ||
-                        cars  != _prevCars ||
-                        fuel  != _prevFuel);
+    void _updateSessionInfo(int lap, int pos, int cars, float fuel, int waterTemp) {
+        bool changed = (lap != _prevLap || pos != _prevPos || cars != _prevCars ||
+                        fuel != _prevFuel || waterTemp != _prevWaterTemp);
         if (!changed) return;
 
-        // Position
+        // POS | LAP  (same row)
         if (pos != _prevPos || cars != _prevCars) {
-            _tft.fillRect(RP_X + 1, MAIN_Y + 122, RP_W/2 - 2, 26, C_BG);
+            _tft.fillRect(RP_X + 1, MAIN_Y + 77, RP_W/2 - 1, 14, C_BG);
             _tft.setTextColor(C_WHITE, C_BG);
             _tft.setTextDatum(TL_DATUM);
-            _tft.setTextSize(3);
-            String posStr = String(pos) + "/" + String(cars);
-            _tft.drawString(posStr, RP_X + 4, MAIN_Y + 124);
-            _prevPos  = pos;
-            _prevCars = cars;
+            _tft.setTextSize(2);
+            _tft.drawString(String(pos) + "/" + String(cars), RP_X + 4, MAIN_Y + 77);
+            _prevPos = pos; _prevCars = cars;
         }
-
-        // Lap number
         if (lap != _prevLap) {
-            _tft.fillRect(RP_X + RP_W/2, MAIN_Y + 122, RP_W/2 - 2, 26, C_BG);
+            _tft.fillRect(RP_X + RP_W/2, MAIN_Y + 77, RP_W/2 - 1, 14, C_BG);
             _tft.setTextColor(C_WHITE, C_BG);
             _tft.setTextDatum(TL_DATUM);
-            _tft.setTextSize(3);
-            _tft.drawString(String(lap), RP_X + RP_W/2 + 4, MAIN_Y + 124);
+            _tft.setTextSize(2);
+            _tft.drawString(String(lap), RP_X + RP_W/2 + 4, MAIN_Y + 77);
             _prevLap = lap;
         }
 
-        // Fuel
+        // FUEL | H2O  (same row)
         if (fuel != _prevFuel) {
-            _tft.fillRect(RP_X + 1, MAIN_Y + 162, RP_W - 2, 30, C_BG);
-            _tft.setTextDatum(TL_DATUM);
-            _tft.setTextSize(3);
-            // Color: low fuel warning
+            _tft.fillRect(RP_X + 1, MAIN_Y + 103, RP_W/2 - 1, 14, C_BG);
             uint16_t col = (fuel < 5.0f) ? C_RED : (fuel < 10.0f ? C_ORANGE : C_GREEN);
             _tft.setTextColor(col, C_BG);
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%.1fL", fuel);
-            _tft.drawString(buf, RP_X + 4, MAIN_Y + 164);
+            _tft.setTextDatum(TL_DATUM);
+            _tft.setTextSize(2);
+            char buf[10]; snprintf(buf, sizeof(buf), "%.1fL", fuel);
+            _tft.drawString(buf, RP_X + 4, MAIN_Y + 103);
             _prevFuel = fuel;
         }
-
+        if (waterTemp != _prevWaterTemp) {
+            _tft.fillRect(RP_X + RP_W/2, MAIN_Y + 103, RP_W/2 - 1, 14, C_BG);
+            uint16_t col = (waterTemp > 105) ? C_RED : (waterTemp > 95 ? C_ORANGE : C_GREEN);
+            if (waterTemp < 70) col = TFT_CYAN;
+            _tft.setTextColor(col, C_BG);
+            _tft.setTextDatum(TL_DATUM);
+            _tft.setTextSize(2);
+            char buf[8]; snprintf(buf, sizeof(buf), "%d\xB0", waterTemp);
+            _tft.drawString(buf, RP_X + RP_W/2 + 4, MAIN_Y + 103);
+            _prevWaterTemp = waterTemp;
+        }
         _tft.setTextSize(1);
+    }
+
+    // ============================================================
+    //  DRS indicator — colored badge at top of right panel
+    //  0 = unavailable (dim)   1 = available/open (yellow)
+    //  2 = active (bright green)
+    // ============================================================
+    void _updateDRS(int status) {
+        if (status == _prevDRS) return;
+
+        int bx = RP_X + 1, by = MAIN_Y + 13;
+        int bw = RP_W - 2,  bh = 22;
+
+        uint16_t bgCol, txCol;
+        const char* label;
+        if (status == 2) {
+            bgCol = C_GREEN;   txCol = C_BG;        label = "DRS ACTIVE";
+        } else if (status == 1) {
+            bgCol = C_DARK_GREY; txCol = C_YELLOW;  label = "DRS OPEN";
+        } else {
+            bgCol = C_DARK_GREY; txCol = C_MID_GREY; label = "DRS";
+        }
+
+        _tft.fillRect(bx, by, bw, bh, bgCol);
+        _tft.setTextColor(txCol, bgCol);
+        _tft.setTextDatum(MC_DATUM);
+        _tft.setTextSize(1);
+        _tft.drawString(label, bx + bw / 2, by + bh / 2);
+        _tft.setTextDatum(TL_DATUM);
+        _prevDRS = status;
+    }
+
+    // ============================================================
+    //  Gaps — front and behind on the same line
+    // ============================================================
+    void _updateGaps(float front, float behind) {
+        if (front == _prevGapF && behind == _prevGapB) return;
+
+        auto fmt = [](float g) -> String {
+            if (g <= 0.001f || g > 59.9f) return String("---");
+            char buf[9]; snprintf(buf, sizeof(buf), "%.3f", g);
+            return String(buf);
+        };
+
+        if (front != _prevGapF) {
+            _tft.fillRect(RP_X + 1, MAIN_Y + 129, RP_W/2 - 1, 14, C_BG);
+            _tft.setTextColor(C_WHITE, C_BG);
+            _tft.setTextDatum(TL_DATUM);
+            _tft.setTextSize(2);
+            _tft.drawString(fmt(front), RP_X + 4, MAIN_Y + 129);
+            _prevGapF = front;
+        }
+        if (behind != _prevGapB) {
+            _tft.fillRect(RP_X + RP_W/2, MAIN_Y + 129, RP_W/2 - 1, 14, C_BG);
+            _tft.setTextColor(C_WHITE, C_BG);
+            _tft.setTextDatum(TL_DATUM);
+            _tft.setTextSize(2);
+            _tft.drawString(fmt(behind), RP_X + RP_W/2 + 4, MAIN_Y + 129);
+            _prevGapB = behind;
+        }
+        _tft.setTextSize(1);
+    }
+
+    // ============================================================
+    //  ERS — label + mode badge same line, bar below
+    // ============================================================
+    void _updateERS(int pct, int mode) {
+        if (pct == _prevErsPct && mode == _prevErsMode) return;
+        pct = constrain(pct, 0, 100);
+        int mi = constrain(mode, 0, 3);
+
+        const char* modeStr[] = {"NONE", "MED", "OT", "HL"};
+        uint16_t    modeCol[] = {C_MID_GREY, C_YELLOW, C_CYAN, C_ORANGE};
+
+        // Label row: "ERS" (static) + pct + mode badge right-aligned
+        _tft.fillRect(RP_X + 28, MAIN_Y + 147, RP_W - 30, 8, C_BG);
+        char buf[6]; snprintf(buf, sizeof(buf), "%d%%", pct);
+        _tft.setTextColor(C_WHITE, C_BG);
+        _tft.setTextDatum(TL_DATUM);
+        _tft.setTextSize(1);
+        _tft.drawString(buf, RP_X + 28, MAIN_Y + 147);
+        _tft.setTextColor(modeCol[mi], C_BG);
+        _tft.setTextDatum(TR_DATUM);
+        _tft.drawString(modeStr[mi], RP_X + RP_W - 2, MAIN_Y + 147);
+
+        // Battery bar
+        int barX = RP_X + 1, barY = MAIN_Y + 158, barW = RP_W - 2, barH = 8;
+        int filled = (pct * barW) / 100;
+        uint16_t col = (pct < 25) ? C_RED : (pct < 50 ? C_YELLOW : C_GREEN);
+        _tft.fillRect(barX, barY, barW, barH, C_DARK_GREY);
+        if (filled > 0) _tft.fillRect(barX, barY, filled, barH, col);
+        _tft.drawRect(barX, barY, barW, barH, C_MID_GREY);
+
+        _tft.setTextDatum(TL_DATUM);
+        _tft.setTextSize(1);
+        _prevErsPct = pct; _prevErsMode = mode;
     }
 
     // ============================================================

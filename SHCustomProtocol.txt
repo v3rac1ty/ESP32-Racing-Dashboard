@@ -34,4 +34,11 @@ format(isnull([LastSector2Time],0),'0.000') + ';' +
 format(isnull([LastSector3Time],0),'0.000') + ';' +
 if(isnull([LastSector1Time]),'0',if([LastSector1Time]<=[PersistantTrackerPlugin.Session_Best_Sector1],'3',if([LastSector1Time]<=[BestSector1Time],'2','1'))) + ';' +
 if(isnull([LastSector2Time]),'0',if([LastSector2Time]<=[PersistantTrackerPlugin.Session_Best_Sector2],'3',if([LastSector2Time]<=[BestSector2Time],'2','1'))) + ';' +
-if(isnull([LastSector3Time]),'0',if([LastSector3Time]<=[PersistantTrackerPlugin.Session_Best_Sector3],'3',if([LastSector3Time]<=[BestSector3Time],'2','1'))) + ';'
+if(isnull([LastSector3Time]),'0',if([LastSector3Time]<=[PersistantTrackerPlugin.Session_Best_Sector3],'3',if([LastSector3Time]<=[BestSector3Time],'2','1'))) + ';' +
+if(isnull([GameRawData.TelemetryPacket.m_drs]),'0',if([GameRawData.TelemetryPacket.m_drs]=1,'2',if(isnull([GameRawData.CarStatusPacket.m_drsAllowed]),'0',if([GameRawData.CarStatusPacket.m_drsAllowed]=1,'1','0')))) + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.GapWithPreviousDriver],0),'0.000') + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.GapWithNextDriver],0),'0.000') + ';' +
+format(isnull([GameRawData.CarStatusPacket.m_ersStoreEnergy],0)/40000,'0') + ';' +
+isnull([GameRawData.CarStatusPacket.m_ersDeployMode],'0') + ';' +
+if(isnull([LastLapTime]),'---',if(isnull([BestLapTime]),'---',format([LastLapTime]-[BestLapTime],'+0.000;-0.000'))) + ';' +
+format(isnull([DataCorePlugin.GameData.NewData.WaterTemperature],0),'0') + ';'
