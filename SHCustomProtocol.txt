@@ -1,0 +1,29 @@
+'SH;' +
+isnull([DataCorePlugin.GameData.NewData.Gear], 'N') + ';' +
+format([DataCorePlugin.GameData.NewData.SpeedKmh], '0') + ';' +
+format([CarSettings_CurrentDisplayedRPMPercent], '0') + ';' +
+format([CarSettings_RPMRedLineSetting], '0') + ';' +
+left([CurrentLapTime], 3, 8) + ';' +
+left([LastLapTime], 3, 8) + ';' +
+left([BestLapTime], 3, 8) + ';' +
+format([PersistantTrackerPlugin.SessionBestLiveDeltaSeconds], '+0.000;-0.000') + ';' +
+format([DataCorePlugin.GameData.NewData.CurrentLap], '0') + ';' +
+format([DataCorePlugin.GameData.NewData.Position], '0') + ';' +
+format([DataCorePlugin.GameData.NewData.OpponentsCount], '0') + ';' +
+format([DataCorePlugin.GameData.NewData.Fuel], '0.0') + ';' +
+isnull([LapInvalidated], 'False') + ';' +
+isnull([TCLevel], '0') + ';' +
+isnull([TCActive], '0') + ';' +
+isnull([ABSLevel], '0') + ';' +
+isnull([ABSActive], '0') + ';' +
+format(abs([BrakeBias]), '00.0') + ';' +
+format([TyrePressureFrontLeft],  '00.0') + ';' +
+format([TyrePressureFrontRight], '00.0') + ';' +
+format([TyrePressureRearLeft],   '00.0') + ';' +
+format([TyrePressureRearRight],  '00.0') + ';' +
+format([TyreTemperatureFrontLeft],  '000') + ';' +
+format([TyreTemperatureFrontRight], '000') + ';' +
+format([TyreTemperatureRearLeft],   '000') + ';' +
+format([TyreTemperatureRearRight],  '000') + ';' +
+format([Throttle], '0') + ';' +
+format([Brake], '0') + ';'
