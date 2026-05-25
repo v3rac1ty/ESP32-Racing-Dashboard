@@ -54,8 +54,12 @@ struct SimHubData {
     // ERS
     int    ersPct      = 0;    // 0-100 %
     int    ersMode     = 0;    // 0=none  1=medium  2=overtake  3=hotlap
-    String lastLapDelta = "---"; // delta of last lap vs best (+S.SSS / -S.SSS)
-    int    waterTemp    = 0;    // °C
+    String lastLapDelta = "---";
+    String tyreCompound = "?";   // "SOFT" / "MED" / "HARD" / "INT" / "WET"
+    int    tyreWearFL   = 100;   // % remaining (100 = new, 0 = dead)
+    int    tyreWearFR   = 100;
+    int    tyreWearRL   = 100;
+    int    tyreWearRR   = 100;
 
     // Sector times (last completed lap) + color flags
     // Flag: 3=purple/session-best  2=green/PB  1=yellow/slower  0=no data
@@ -190,7 +194,12 @@ private:
         data.ersMode    = field(line, i++).toInt();
         data.lastLapDelta = field(line, i++);
         if (data.lastLapDelta.isEmpty()) data.lastLapDelta = "---";
-        data.waterTemp  = field(line, i++).toInt();
+        data.tyreCompound = field(line, i++);
+        if (data.tyreCompound.isEmpty()) data.tyreCompound = "?";
+        data.tyreWearFL = field(line, i++).toInt();
+        data.tyreWearFR = field(line, i++).toInt();
+        data.tyreWearRL = field(line, i++).toInt();
+        data.tyreWearRR = field(line, i++).toInt();
 
         data.valid = true;
         return true;

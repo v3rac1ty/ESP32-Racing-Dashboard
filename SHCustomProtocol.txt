@@ -41,4 +41,8 @@ format(isnull([DataCorePlugin.GameData.NewData.GapWithNextDriver],0),'0.000') + 
 format(isnull([GameRawData.CarStatusPacket.m_ersStoreEnergy],0)/40000,'0') + ';' +
 isnull([GameRawData.CarStatusPacket.m_ersDeployMode],'0') + ';' +
 if(isnull([LastLapTime]),'---',if(isnull([BestLapTime]),'---',format([LastLapTime]-[BestLapTime],'+0.000;-0.000'))) + ';' +
-format(isnull([DataCorePlugin.GameData.NewData.WaterTemperature],0),'0') + ';'
+if(isnull([GameRawData.CarStatusPacket.m_tyreVisualCompound]),'?',if([GameRawData.CarStatusPacket.m_tyreVisualCompound]=16,'SOFT',if([GameRawData.CarStatusPacket.m_tyreVisualCompound]=17,'MED',if([GameRawData.CarStatusPacket.m_tyreVisualCompound]=18,'HARD',if([GameRawData.CarStatusPacket.m_tyreVisualCompound]=7,'INT',if([GameRawData.CarStatusPacket.m_tyreVisualCompound]=8,'WET','?')))))) + ';' +
+format(isnull([TyreWearFrontLeft],100),'0') + ';' +
+format(isnull([TyreWearFrontRight],100),'0') + ';' +
+format(isnull([TyreWearRearLeft],100),'0') + ';' +
+format(isnull([TyreWearRearRight],100),'0') + ';'

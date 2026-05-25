@@ -38,13 +38,14 @@ public:
         _updateSectors(d.s1Time, d.s2Time, d.s3Time, d.s1Flag, d.s2Flag, d.s3Flag);
         _updateDRS(d.drsStatus);
         _updateDelta(d.delta);
-        _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel, d.waterTemp);
+        _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel, d.tyreCompound);
         _updateGaps(d.gapFront, d.gapBehind);
         _updateERS(d.ersPct, d.ersMode);
         _updateAids(d.tcLevel, d.tcActive, d.absLevel, d.absActive, d.brakeBias,
                     d.diffOnThrottle);
         _updateTyres(d.tyrePFL, d.tyrePFR, d.tyrePRL, d.tyrePRR,
-                     d.tyreTFL, d.tyreTFR, d.tyreTRL, d.tyreTRR);
+                     d.tyreTFL, d.tyreTFR, d.tyreTRL, d.tyreTRR,
+                     d.tyreWearFL, d.tyreWearFR, d.tyreWearRL, d.tyreWearRR);
         _updateGraph(d.throttle, d.brake);
     }
 
@@ -74,7 +75,8 @@ private:
     int    _prevErsMode   = -1;
     String _prevLastDelta;
     String _prevCurDelta;
-    int    _prevWaterTemp = -1;
+    String _prevTyreComp;
+    int    _prevTyreW[4]  = {-1,-1,-1,-1};
     int    _prevTC        = -1;
     bool   _prevTCA       = false;
     int    _prevABS       = -1;
@@ -140,17 +142,17 @@ private:
         _labelText("POS",    RP_X + 4,  MAIN_Y + 69,  C_LIGHT_GREY);
         _labelText("LAP",    RP_X + 80, MAIN_Y + 69,  C_LIGHT_GREY);
         _labelText("FUEL",   RP_X + 4,  MAIN_Y + 95,  C_LIGHT_GREY);
-        _labelText("H2O",    RP_X + 80, MAIN_Y + 95,  C_LIGHT_GREY);
+        _labelText("COMP",   RP_X + 80, MAIN_Y + 95,  C_LIGHT_GREY);
         _labelText("GAP F",  RP_X + 4,  MAIN_Y + 121, C_LIGHT_GREY);
         _labelText("GAP B",  RP_X + 80, MAIN_Y + 121, C_LIGHT_GREY);
         _labelText("ERS",    RP_X + 4,  MAIN_Y + 147, C_LIGHT_GREY);
 
         // ---- Bottom tyre labels ----
         _labelText("TYRES",   BT_TYRE_X + 4,  BOT_Y + 2,  C_LIGHT_GREY);
-        _labelText("FL",      BT_TYRE_X + 4,  BOT_Y + 16, C_CYAN);
-        _labelText("FR",      BT_TYRE_X + 102,BOT_Y + 16, C_CYAN);
-        _labelText("RL",      BT_TYRE_X + 4,  BOT_Y + 46, C_CYAN);
-        _labelText("RR",      BT_TYRE_X + 102,BOT_Y + 46, C_CYAN);
+        _labelText("FL",      BT_TYRE_X + 2,  BOT_Y + 12, C_CYAN);
+        _labelText("FR",      BT_TYRE_X + 102,BOT_Y + 12, C_CYAN);
+        _labelText("RL",      BT_TYRE_X + 2,  BOT_Y + 44, C_CYAN);
+        _labelText("RR",      BT_TYRE_X + 102,BOT_Y + 44, C_CYAN);
 
         // ---- Bottom aids — row 1: TC / ABS ----
         _labelText("TC",    BT_AID_X + 4,  BOT_Y + 4,  C_YELLOW);
@@ -429,11 +431,12 @@ private:
     }
 
     // ============================================================
-    //  Session info — pos/lap, fuel + water temp
+    //  Session info — pos/lap, fuel + tyre compound
     // ============================================================
-    void _updateSessionInfo(int lap, int pos, int cars, float fuel, int waterTemp) {
+    void _updateSessionInfo(int lap, int pos, int cars, float fuel,
+                            const String& compound) {
         bool changed = (lap != _prevLap || pos != _prevPos || cars != _prevCars ||
-                        fuel != _prevFuel || waterTemp != _prevWaterTemp);
+                        fuel != _prevFuel || compound != _prevTyreComp);
         if (!changed) return;
 
         // POS | LAP  (same row)
@@ -454,7 +457,7 @@ private:
             _prevLap = lap;
         }
 
-        // FUEL | H2O  (same row)
+        // FUEL | COMP  (same row)
         if (fuel != _prevFuel) {
             _tft.fillRect(RP_X + 1, MAIN_Y + 103, RP_W/2 - 1, 14, C_BG);
             uint16_t col = (fuel < 5.0f) ? C_RED : (fuel < 10.0f ? C_ORANGE : C_GREEN);
@@ -465,16 +468,19 @@ private:
             _tft.drawString(buf, RP_X + 4, MAIN_Y + 103);
             _prevFuel = fuel;
         }
-        if (waterTemp != _prevWaterTemp) {
+        if (compound != _prevTyreComp) {
             _tft.fillRect(RP_X + RP_W/2, MAIN_Y + 103, RP_W/2 - 1, 14, C_BG);
-            uint16_t col = (waterTemp > 105) ? C_RED : (waterTemp > 95 ? C_ORANGE : C_GREEN);
-            if (waterTemp < 70) col = TFT_CYAN;
+            uint16_t col = C_LIGHT_GREY;
+            if      (compound == "SOFT") col = C_RED;
+            else if (compound == "MED")  col = C_YELLOW;
+            else if (compound == "HARD") col = C_WHITE;
+            else if (compound == "INT")  col = C_GREEN;
+            else if (compound == "WET")  col = TFT_CYAN;
             _tft.setTextColor(col, C_BG);
             _tft.setTextDatum(TL_DATUM);
             _tft.setTextSize(2);
-            char buf[8]; snprintf(buf, sizeof(buf), "%d\xB0", waterTemp);
-            _tft.drawString(buf, RP_X + RP_W/2 + 4, MAIN_Y + 103);
-            _prevWaterTemp = waterTemp;
+            _tft.drawString(compound, RP_X + RP_W/2 + 4, MAIN_Y + 103);
+            _prevTyreComp = compound;
         }
         _tft.setTextSize(1);
     }
@@ -623,49 +629,68 @@ private:
     }
 
     // ============================================================
-    //  Tyre Data — bottom left
+    //  Tyre Data — each wheel: pressure + temp° + wear% on one row
+    //
+    //  Column layout (100px per wheel):
+    //   x+0   : label (static)
+    //   x+14  : pressure  "26.1"  textSize 2 (48px) → ends x+62
+    //   x+64  : temp°     "88°"   textSize 1 (18px) → ends x+82
+    //   x+82  : wear%     "97%"   textSize 1 (18px) → ends x+100
+    //
+    //  Wear color: green >75%  yellow >50%  orange >25%  red ≤25%
     // ============================================================
     void _updateTyres(float pFL, float pFR, float pRL, float pRR,
-                      float tFL, float tFR, float tRL, float tRR) {
+                      float tFL, float tFR, float tRL, float tRR,
+                      int   wFL, int   wFR, int   wRL, int   wRR) {
         float p[4] = {pFL, pFR, pRL, pRR};
         float t[4] = {tFL, tFR, tRL, tRR};
+        int   w[4] = {wFL, wFR, wRL, wRR};
 
-        // Positions: [FL, FR, RL, RR]
-        // Two rows, two columns
-        int colX[2] = {BT_TYRE_X + 20, BT_TYRE_X + 102};
-        int rowY[2] = {BOT_Y + 28,  BOT_Y + 58};
-        int idx[4][2] = {{0,0},{1,0},{0,1},{1,1}};  // [FL,FR,RL,RR] -> [col,row]
+        // Column x-starts, row y-starts (pressure baseline)
+        static constexpr int colX[2] = {BT_TYRE_X,       BT_TYRE_X + 100};
+        static constexpr int rowY[2] = {BOT_Y + 20,       BOT_Y + 52};
+        // [FL, FR, RL, RR] → [col, row]
+        static constexpr int ci[4] = {0, 1, 0, 1};
+        static constexpr int ri[4] = {0, 0, 1, 1};
 
         for (int i = 0; i < 4; i++) {
-            bool pChanged = (p[i] != _prevTyreP[i]);
-            bool tChanged = (t[i] != _prevTyreT[i]);
-            if (!pChanged && !tChanged) continue;
+            bool changed = (p[i] != _prevTyreP[i] ||
+                            t[i] != _prevTyreT[i] ||
+                            w[i] != _prevTyreW[i]);
+            if (!changed) continue;
 
-            int cx = colX[idx[i][0]];
-            int cy = rowY[idx[i][1]];
+            int cx = colX[ci[i]];
+            int cy = rowY[ri[i]];
 
-            _tft.fillRect(cx - 2, cy - 2, 78, 26, C_BG);
+            // Clear the data area (not the static label row above)
+            _tft.fillRect(cx + 13, cy - 1, 86, 21, C_BG);
 
-            // Pressure in white
-            char pbuf[8], tbuf[8];
+            char pbuf[8], tbuf[8], wbuf[6];
             snprintf(pbuf, sizeof(pbuf), "%.1f", p[i]);
-            snprintf(tbuf, sizeof(tbuf), "%.0f", t[i]);
+            snprintf(tbuf, sizeof(tbuf), "%.0f\xB0", t[i]);   // e.g. "88°"
+            snprintf(wbuf, sizeof(wbuf), "%d%%", constrain(w[i], 0, 100));
 
-            // Tyre temp color coding: cold=blue, optimal=green, hot=red
             uint16_t tempCol = _tyreTempColor(t[i]);
+            uint16_t wearCol = (w[i] > 75) ? C_GREEN :
+                               (w[i] > 50) ? C_YELLOW :
+                               (w[i] > 25) ? C_ORANGE : C_RED;
 
+            // Pressure
             _tft.setTextColor(C_CYAN, C_BG);
             _tft.setTextDatum(TL_DATUM);
             _tft.setTextSize(2);
-            _tft.drawString(String(pbuf), cx, cy);
+            _tft.drawString(pbuf, cx + 14, cy);
 
-            // Small temp indicator
-            _tft.setTextColor(tempCol, C_BG);
+            // Temp° + Wear% (smaller, same baseline)
             _tft.setTextSize(1);
-            _tft.drawString(String(tbuf) + (char)247, cx + 42, cy + 8); // 247 = degree symbol approx
+            _tft.setTextColor(tempCol, C_BG);
+            _tft.drawString(tbuf, cx + 64, cy + 8);
+            _tft.setTextColor(wearCol, C_BG);
+            _tft.drawString(wbuf, cx + 82, cy + 8);
 
             _prevTyreP[i] = p[i];
             _prevTyreT[i] = t[i];
+            _prevTyreW[i] = w[i];
         }
         _tft.setTextSize(1);
     }
