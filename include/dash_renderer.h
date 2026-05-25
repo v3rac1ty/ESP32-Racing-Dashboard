@@ -38,7 +38,7 @@ public:
         _updateDelta(d.delta);
         _updateSessionInfo(d.lap, d.position, d.numCars, d.fuel);
         _updateAids(d.tcLevel, d.tcActive, d.absLevel, d.absActive, d.brakeBias,
-                    d.diffOnThrottle, d.diffOffThrottle);
+                    d.diffOnThrottle);
         _updateTyres(d.tyrePFL, d.tyrePFR, d.tyrePRL, d.tyrePRR,
                      d.tyreTFL, d.tyreTFR, d.tyreTRL, d.tyreTRR);
         _updateGraph(d.throttle, d.brake);
@@ -137,13 +137,12 @@ private:
         _labelText("RL",      BT_TYRE_X + 4,  BOT_Y + 46, C_CYAN);
         _labelText("RR",      BT_TYRE_X + 102,BOT_Y + 46, C_CYAN);
 
-        // ---- Bottom aids labels — row 1: TC / ABS / BB ----
-        _labelText("TC",      BT_AID_X + 4,   BOT_Y + 4,  C_YELLOW);
-        _labelText("ABS",     BT_AID_X + 46,  BOT_Y + 4,  C_BLUE);
-        _labelText("BB",      BT_AID_X + 94,  BOT_Y + 4,  C_MAGENTA);
-        // ---- Bottom aids labels — row 2: DIFF ON / DIFF OFF ----
-        _labelText("D-ON",    BT_AID_X + 4,   BOT_Y + 42, C_TEAL);
-        _labelText("D-OFF",   BT_AID_X + 68,  BOT_Y + 42, C_TEAL);
+        // ---- Bottom aids — row 1: TC / ABS ----
+        _labelText("TC",    BT_AID_X + 4,  BOT_Y + 4,  C_YELLOW);
+        _labelText("ABS",   BT_AID_X + 68, BOT_Y + 4,  C_BLUE);
+        // ---- Bottom aids — row 2: BB / DIFF ----
+        _labelText("BB",    BT_AID_X + 4,  BOT_Y + 42, C_MAGENTA);
+        _labelText("DIFF",  BT_AID_X + 68, BOT_Y + 42, C_TEAL);
 
         // ---- Trace graph border and label ----
         _tft.drawRect(GRAPH_X - 1, GRAPH_Y - 1, GRAPH_W + 2, GRAPH_H + 2, C_DARK_GREY);
@@ -430,60 +429,50 @@ private:
     }
 
     // ============================================================
-    //  Driver Aids — bottom center, two rows:
-    //  Row 1 (y≈18): TC  ABS  BB
-    //  Row 2 (y≈56): DIFF-ON  DIFF-OFF
+    //  Driver Aids — 2×2 grid:
+    //  Row 1:  TC       ABS
+    //  Row 2:  BB       DIFF (on-throttle)
     // ============================================================
-    void _updateAids(int tc, bool tcA, int abs_, bool absA, float bb,
-                     int diffOn, int diffOff) {
-        bool changed = (tc      != _prevTC    || tcA   != _prevTCA  ||
-                        abs_    != _prevABS   || absA  != _prevABSA ||
-                        bb      != _prevBB    ||
-                        diffOn  != _prevDiffOn || diffOff != _prevDiffOff);
+    void _updateAids(int tc, bool tcA, int abs_, bool absA, float bb, int diffOn) {
+        bool changed = (tc    != _prevTC   || tcA  != _prevTCA  ||
+                        abs_  != _prevABS  || absA != _prevABSA ||
+                        bb    != _prevBB   || diffOn != _prevDiffOn);
         if (!changed) return;
 
         int x  = BT_AID_X;
         int y1 = BOT_Y + 18;   // row 1 values
         int y2 = BOT_Y + 56;   // row 2 values
 
-        // ── Row 1: TC ──
-        _tft.fillRect(x + 2,  y1 - 2, 38, 26, C_BG);
-        _tft.setTextColor(tcA ? C_YELLOW : C_MID_GREY, C_BG);
         _tft.setTextDatum(TL_DATUM);
         _tft.setTextSize(3);
+
+        // ── Row 1, Col 1: TC ──
+        _tft.fillRect(x + 2,  y1 - 2, 60, 26, C_BG);
+        _tft.setTextColor(tcA ? C_YELLOW : C_MID_GREY, C_BG);
         _tft.drawString(String(tc), x + 4, y1);
 
-        // ── Row 1: ABS ──
-        _tft.fillRect(x + 42, y1 - 2, 42, 26, C_BG);
+        // ── Row 1, Col 2: ABS ──
+        _tft.fillRect(x + 66, y1 - 2, 60, 26, C_BG);
         _tft.setTextColor(absA ? TFT_CYAN : C_MID_GREY, C_BG);
-        _tft.drawString(String(abs_), x + 44, y1);
+        _tft.drawString(String(abs_), x + 68, y1);
 
-        // ── Row 1: BB ──
-        _tft.fillRect(x + 86, y1 - 2, 42, 26, C_BG);
+        // ── Row 2, Col 1: BB ──
+        _tft.fillRect(x + 2,  y2 - 2, 60, 26, C_BG);
         _tft.setTextColor(C_MAGENTA, C_BG);
-        char bbBuf[8];
-        snprintf(bbBuf, sizeof(bbBuf), "%.0f", bb);
-        _tft.drawString(bbBuf, x + 88, y1);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%.0f", bb);
+        _tft.drawString(buf, x + 4, y2);
 
-        // ── Row 2: Diff on throttle ──
-        _tft.fillRect(x + 2,  y2 - 2, 58, 26, C_BG);
-        _tft.setTextColor(C_TEAL, C_BG);
-        _tft.setTextSize(3);
-        char dBuf[8];
-        snprintf(dBuf, sizeof(dBuf), "%d%%", diffOn);
-        _tft.drawString(dBuf, x + 4, y2);
-
-        // ── Row 2: Diff off throttle ──
+        // ── Row 2, Col 2: DIFF (on-throttle) ──
         _tft.fillRect(x + 66, y2 - 2, 62, 26, C_BG);
         _tft.setTextColor(C_TEAL, C_BG);
-        snprintf(dBuf, sizeof(dBuf), "%d%%", diffOff);
-        _tft.drawString(dBuf, x + 68, y2);
+        snprintf(buf, sizeof(buf), "%d%%", diffOn);
+        _tft.drawString(buf, x + 68, y2);
 
         _tft.setTextSize(1);
-        _prevTC      = tc;    _prevTCA     = tcA;
-        _prevABS     = abs_;  _prevABSA    = absA;
-        _prevBB      = bb;
-        _prevDiffOn  = diffOn; _prevDiffOff = diffOff;
+        _prevTC     = tc;   _prevTCA    = tcA;
+        _prevABS    = abs_; _prevABSA   = absA;
+        _prevBB     = bb;   _prevDiffOn = diffOn;
     }
 
     // ============================================================
@@ -576,22 +565,36 @@ private:
             _graphSprite->drawFastHLine(0, gy, GRAPH_W, GRID);
         }
 
-        // Draw each column oldest-to-newest (left-to-right = past-to-present)
+        // Draw each column oldest-to-newest (left = past, right = present)
+        // Connect consecutive points with a vertical segment to avoid gaps on fast moves.
         for (int col = 0; col < GRAPH_W; col++) {
-            int i = (_ghead + col) % GRAPH_W;
+            int i  = (_ghead + col) % GRAPH_W;
             int tv = _gthr[i];
             int bv = _gbrk[i];
 
-            int thrH = (tv * GRAPH_H) / 100;
-            int brkH = (bv * GRAPH_H) / 100;
+            // y position: 0% → bottom pixel, 100% → top pixel
+            int thrY = GRAPH_H - 1 - (tv * (GRAPH_H - 1)) / 100;
+            int brkY = GRAPH_H - 1 - (bv * (GRAPH_H - 1)) / 100;
 
-            // Throttle — green, rising from bottom
-            if (thrH > 0)
-                _graphSprite->drawFastVLine(col, GRAPH_H - thrH, thrH, C_GREEN);
+            if (col == 0) {
+                // First column — single pixel each
+                _graphSprite->drawPixel(0, thrY, C_GREEN);
+                _graphSprite->drawPixel(0, brkY, C_RED);
+            } else {
+                int pi      = (_ghead + col - 1) % GRAPH_W;
+                int prevThrY = GRAPH_H - 1 - (_gthr[pi] * (GRAPH_H - 1)) / 100;
+                int prevBrkY = GRAPH_H - 1 - (_gbrk[pi] * (GRAPH_H - 1)) / 100;
 
-            // Brake — red, rising from bottom, drawn on top of throttle
-            if (brkH > 0)
-                _graphSprite->drawFastVLine(col, GRAPH_H - brkH, brkH, C_RED);
+                // Throttle line — fill vertical gap so diagonal moves stay connected
+                int minY = thrY < prevThrY ? thrY : prevThrY;
+                int maxY = thrY > prevThrY ? thrY : prevThrY;
+                _graphSprite->drawFastVLine(col, minY, maxY - minY + 1, C_GREEN);
+
+                // Brake line — same treatment
+                minY = brkY < prevBrkY ? brkY : prevBrkY;
+                maxY = brkY > prevBrkY ? brkY : prevBrkY;
+                _graphSprite->drawFastVLine(col, minY, maxY - minY + 1, C_RED);
+            }
         }
 
         // Push sprite to screen as one SPI burst
