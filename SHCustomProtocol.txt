@@ -45,4 +45,4 @@ if(isnull([GameRawData.CarStatusPacket.m_tyreVisualCompound]),'?',if([GameRawDat
 format(isnull([TyreWearFrontLeft],100),'0') + ';' +
 format(isnull([TyreWearFrontRight],100),'0') + ';' +
 format(isnull([TyreWearRearLeft],100),'0') + ';' +
-format(isnull([TyreWearRearRight],100),'0') + ';'
+format(isnull([TyreWearRearRight],100),'0') + ';\n'

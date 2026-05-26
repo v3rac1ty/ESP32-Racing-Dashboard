@@ -225,8 +225,6 @@ private:
                 // Colour override: dots at or beyond the redline threshold go red
                 uint16_t col = (i >= redlineDot) ? C_RED : rpmDotColor(i);
                 _tft.fillCircle(cx, CY, RPM_DOT_R, col);
-                // Bright inner highlight — tiny white dot for "LED" look
-                _tft.fillCircle(cx - 3, CY - 3, 2, 0xFFFF);
             } else {
                 // Unlit: dark filled circle with a dim outline ring
                 _tft.fillCircle(cx, CY, RPM_DOT_R, C_BG);
