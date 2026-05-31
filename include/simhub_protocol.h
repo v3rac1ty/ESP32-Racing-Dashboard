@@ -44,7 +44,7 @@ struct SimHubData {
     float  tyreTRL     = 0.0f;
     float  tyreTRR     = 0.0f;
 
-    // DRS: 0=unavailable  1=available (open zone)  2=active
+    // DRS: 0=not in zone  1=available  2=active  3=FIA disabled
     int    drsStatus   = 0;
 
     // Time gaps to adjacent cars (seconds; 0 = no car / lapped)
@@ -53,7 +53,7 @@ struct SimHubData {
 
     // ERS
     int    ersPct      = 0;    // 0-100 %
-    int    ersMode     = 0;    // 0=none  1=medium  2=overtake  3=hotlap
+    int    ersMode     = 0;    // 0=none  1=medium  2=hotlap  3=overtake
     String lastLapDelta = "---";
     String tyreCompound = "?";   // "SOFT" / "MED" / "HARD" / "INT" / "WET"
     int    tyreWearFL   = 100;   // % remaining (100 = new, 0 = dead)
@@ -76,7 +76,13 @@ struct SimHubData {
     int    diffOnThrottle  = 50;
     int    diffOffThrottle = 50;
 
-    bool valid = false;   // true once at least one packet received
+    // Safety car / VSC / pit lane limiter
+    int   safetyCarStatus  = 0;    // 0=none  1=safety car  2=virtual safety car
+    float scRequiredDelta  = 0.0f; // target gap to maintain behind SC
+    bool  pitLimiterActive = false;
+    int   pitSpeedLimit    = 80;   // km/h
+
+    bool valid = false;
 };
 
 // ============================================================
@@ -84,16 +90,11 @@ struct SimHubData {
 // ============================================================
 class SimHubParser {
 public:
-    // Feed bytes into the parser; returns true when a complete packet is parsed.
     bool feed(int c) {
         if (c < 0) return false;
 
-        // Look for "SH;" sync header
         if (!_synced) {
             _syncBuf[_syncIdx++ % 3] = (char)c;
-            // Check last 3 chars
-            char a = _syncBuf[0], b = _syncBuf[1], cc = _syncBuf[2];
-            // Circular: need to check order carefully
             int si = _syncIdx % 3;
             char s0 = _syncBuf[(si + 0) % 3];
             char s1 = _syncBuf[(si + 1) % 3];
@@ -106,11 +107,10 @@ public:
             return false;
         }
 
-        // Accumulate until newline
         if ((char)c == '\n') {
             bool ok = _parse(_line);
             _line = "";
-            _synced = false;  // require re-sync for next packet
+            _synced = false;
             _syncIdx = 0;
             return ok;
         }
@@ -128,7 +128,6 @@ private:
     int    _syncIdx  = 0;
     String _line;
 
-    // Split by ';', return field at index
     String field(const String& s, int idx) {
         int start = 0, found = 0;
         for (int i = 0; i <= (int)s.length(); i++) {
@@ -141,67 +140,172 @@ private:
         return "";
     }
 
+    String _normalizeCompound(const String& raw) {
+        String c = raw;
+        c.trim();
+        if (c.isEmpty()) return "?";
+        c.toUpperCase();
+
+        if (c == "MEDIUM") return "MED";
+        if (c == "INTERMEDIATE" || c == "INTERMEDIATES" || c == "INTER" || c == "INTERS") return "INT";
+        if (c == "WETS") return "WET";
+        if (c == "SOFTS") return "SOFT";
+        if (c == "HARDS") return "HARD";
+        if (c == "S") return "SOFT";
+        if (c == "M") return "MED";
+        if (c == "H") return "HARD";
+        if (c == "I") return "INT";
+        if (c == "W") return "WET";
+        if (c == "C3") return "SOFT";
+        if (c == "C4") return "MED";
+        if (c == "C5") return "HARD";
+        if (c == "W") return "WET";
+        if (c == "I") return "INT";
+        if (c == "W") return "WET";
+        if (c == "NONE" || c == "UNKNOWN" || c == "N/A" || c == "NA") return "?";
+        if (c == "SOFT" || c == "MED" || c == "HARD" || c == "INT" || c == "WET") return c;
+
+        bool numeric = true;
+        for (unsigned int j = 0; j < c.length(); j++) {
+            char ch = c[j];
+            if (ch < '0' || ch > '9') { numeric = false; break; }
+        }
+        if (numeric) {
+            int code = c.toInt();
+            switch (code) {
+                case 1:  return "SOFT";
+                case 2:  return "MED";
+                case 3:  return "HARD";
+                case 4:  return "INT";
+                case 5:  return "WET";
+                case 7:  return "INT";
+                case 8:  return "WET";
+                case 16: return "SOFT";
+                case 17: return "MED";
+                case 18: return "HARD";
+                case 19: return "HARD";
+                case 20: return "HARD";
+                default: return "?";
+            }
+        }
+
+        return c;
+    }
+
     bool _parse(const String& line) {
         if (line.length() < 5) return false;
 
-        // Field order matches SHCustomProtocol.txt exactly
+        SimHubData next = data;
         int i = 0;
-        data.gear       = field(line, i++);  if (data.gear.isEmpty()) data.gear = "-";
-        data.speed      = field(line, i++).toInt();
-        data.rpmPct     = field(line, i++).toInt();
-        data.rpmRedline = field(line, i++).toInt();
-        data.curLap     = field(line, i++);
-        data.lastLap    = field(line, i++);
-        data.bestLap    = field(line, i++);
-        data.delta      = field(line, i++);
-        data.lap        = field(line, i++).toInt();
-        data.position   = field(line, i++).toInt();
-        data.numCars    = field(line, i++).toInt();
-        data.fuel       = field(line, i++).toFloat();
-        String lapInvStr= field(line, i++);
-        data.lapInvalid = (lapInvStr == "True" || lapInvStr == "1");
-        data.tcLevel    = field(line, i++).toInt();
-        String tcAct    = field(line, i++);
-        data.tcActive   = (tcAct == "1" || tcAct == "True");
-        data.absLevel   = field(line, i++).toInt();
-        String absAct   = field(line, i++);
-        data.absActive  = (absAct == "1" || absAct == "True");
-        data.brakeBias  = field(line, i++).toFloat();
-        data.tyrePFL    = field(line, i++).toFloat();
-        data.tyrePFR    = field(line, i++).toFloat();
-        data.tyrePRL    = field(line, i++).toFloat();
-        data.tyrePRR    = field(line, i++).toFloat();
-        data.tyreTFL    = field(line, i++).toFloat();
-        data.tyreTFR    = field(line, i++).toFloat();
-        data.tyreTRL    = field(line, i++).toFloat();
-        data.tyreTRR    = field(line, i++).toFloat();
-        data.throttle   = field(line, i++).toInt();
-        data.brake      = field(line, i++).toInt();
-        data.diffOnThrottle  = field(line, i++).toInt();
-        data.diffOffThrottle = field(line, i++).toInt();
-        // Sector times + color flags
-        data.s1Time = field(line, i++);  if (data.s1Time.isEmpty()) data.s1Time = "-.---";
-        data.s2Time = field(line, i++);  if (data.s2Time.isEmpty()) data.s2Time = "-.---";
-        data.s3Time = field(line, i++);  if (data.s3Time.isEmpty()) data.s3Time = "-.---";
-        data.s1Flag = field(line, i++).toInt();
-        data.s2Flag = field(line, i++).toInt();
-        data.s3Flag = field(line, i++).toInt();
-        // DRS / gaps / ERS
-        data.drsStatus  = field(line, i++).toInt();
-        data.gapFront   = field(line, i++).toFloat();
-        data.gapBehind  = field(line, i++).toFloat();
-        data.ersPct     = field(line, i++).toInt();
-        data.ersMode    = field(line, i++).toInt();
-        data.lastLapDelta = field(line, i++);
-        if (data.lastLapDelta.isEmpty()) data.lastLapDelta = "---";
-        data.tyreCompound = field(line, i++);
-        if (data.tyreCompound.isEmpty()) data.tyreCompound = "?";
-        data.tyreWearFL = field(line, i++).toInt();
-        data.tyreWearFR = field(line, i++).toInt();
-        data.tyreWearRL = field(line, i++).toInt();
-        data.tyreWearRR = field(line, i++).toInt();
+        String f;
 
-        data.valid = true;
+        f = field(line, i++);  if (!f.isEmpty()) next.gear = f;
+        if (next.gear.isEmpty()) next.gear = "-";
+
+        f = field(line, i++);  if (!f.isEmpty()) next.speed = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.rpmPct = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.rpmRedline = f.toInt();
+
+        f = field(line, i++);  if (!f.isEmpty()) next.curLap = f;
+        f = field(line, i++);  if (!f.isEmpty()) next.lastLap = f;
+        f = field(line, i++);  if (!f.isEmpty()) next.bestLap = f;
+        f = field(line, i++);  if (!f.isEmpty()) next.delta = f;
+
+        f = field(line, i++);  if (!f.isEmpty()) next.lap = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.position = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.numCars = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.fuel = f.toFloat();
+
+        f = field(line, i++);  if (!f.isEmpty()) next.lapInvalid = (f == "True" || f == "1");
+        f = field(line, i++);  if (!f.isEmpty()) next.tcLevel = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.tcActive = (f == "1" || f == "True");
+        f = field(line, i++);  if (!f.isEmpty()) next.absLevel = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.absActive = (f == "1" || f == "True");
+        f = field(line, i++);  if (!f.isEmpty()) next.brakeBias = f.toFloat();
+
+        f = field(line, i++);  if (!f.isEmpty()) next.tyrePFL = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyrePFR = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyrePRL = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyrePRR = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreTFL = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreTFR = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreTRL = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreTRR = f.toFloat();
+
+        f = field(line, i++);  if (!f.isEmpty()) next.throttle = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.brake = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.diffOnThrottle = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.diffOffThrottle = f.toInt();
+
+        String s1 = field(line, i++);
+        String s2 = field(line, i++);
+        String s3 = field(line, i++);
+        if (!s1.isEmpty()) next.s1Time = s1;
+        if (!s2.isEmpty()) next.s2Time = s2;
+        if (!s3.isEmpty()) next.s3Time = s3;
+        f = field(line, i++);  if (!f.isEmpty()) next.s1Flag = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.s2Flag = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.s3Flag = f.toInt();
+
+        if (next.s1Flag == 0 && (next.s1Time == "0.000" || next.s1Time == "0")) next.s1Time = "-.---";
+        if (next.s2Flag == 0 && (next.s2Time == "0.000" || next.s2Time == "0")) next.s2Time = "-.---";
+        if (next.s3Flag == 0 && (next.s3Time == "0.000" || next.s3Time == "0")) next.s3Time = "-.---";
+        if (next.s1Time.isEmpty()) next.s1Time = "-.---";
+        if (next.s2Time.isEmpty()) next.s2Time = "-.---";
+        if (next.s3Time.isEmpty()) next.s3Time = "-.---";
+
+        f = field(line, i++);  if (!f.isEmpty()) next.drsStatus = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.gapFront = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.gapBehind = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) {
+            float ersVal = f.toFloat();
+            if (ersVal > 1000.0f) ersVal = ersVal / 40000.0f;
+            if (ersVal < 0.0f) ersVal = 0.0f;
+            if (ersVal > 100.0f) ersVal = 100.0f;
+            next.ersPct = (int)(ersVal + 0.5f);
+        }
+        f = field(line, i++);  if (!f.isEmpty()) next.ersMode = f.toInt();
+
+        f = field(line, i++);  if (!f.isEmpty()) next.lastLapDelta = f;
+        if (next.lastLapDelta.isEmpty()) next.lastLapDelta = "---";
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreCompound = f;
+        String normComp = _normalizeCompound(next.tyreCompound);
+        if (normComp == "?" && !f.isEmpty() && !data.tyreCompound.isEmpty() && data.tyreCompound != "?") {
+            normComp = data.tyreCompound;
+        }
+        next.tyreCompound = normComp;
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreWearFL = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreWearFR = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreWearRL = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.tyreWearRR = f.toInt();
+
+        // Appended fields — only overwrite when present
+        f = field(line, i++);  if (!f.isEmpty()) next.safetyCarStatus = f.toInt();
+        f = field(line, i++);  if (!f.isEmpty()) next.scRequiredDelta = f.toFloat();
+        f = field(line, i++);  if (!f.isEmpty()) next.pitLimiterActive = (f == "1" || f == "True");
+        f = field(line, i++);  if (!f.isEmpty()) { int psl = f.toInt(); if (psl > 0) next.pitSpeedLimit = psl; }
+
+        auto zeroLikeTime = [](const String& s) -> bool {
+            return s.isEmpty() || s == "--:--.---" || s == "-.---" ||
+                   s == "0" || s == "0.0" || s == "0.00" || s == "0.000" ||
+                   s == "00:00.000" || s == "0:00.000";
+        };
+
+        bool active = false;
+        if (next.speed > 0 || next.rpmPct > 0 || next.lap > 0 || next.position > 0 || next.numCars > 0) active = true;
+        if (next.throttle > 0 || next.brake > 0 || next.ersPct > 0) active = true;
+        if (next.gapFront > 0.001f || next.gapBehind > 0.001f || next.scRequiredDelta > 0.001f) active = true;
+        if (next.drsStatus > 0 || next.safetyCarStatus > 0 || next.pitLimiterActive) active = true;
+        if (next.s1Flag > 0 || next.s2Flag > 0 || next.s3Flag > 0) active = true;
+        if (!zeroLikeTime(next.curLap) || !zeroLikeTime(next.lastLap) || !zeroLikeTime(next.bestLap)) active = true;
+        if (next.delta != "+0.000" && next.delta != "-0.000") active = true;
+        if (next.tyreCompound != "?" || next.tyreWearFL != 100 || next.tyreWearFR != 100 ||
+            next.tyreWearRL != 100 || next.tyreWearRR != 100) active = true;
+
+        if (!active) return false;
+
+        next.valid = true;
+        data = next;
         return true;
     }
 };
